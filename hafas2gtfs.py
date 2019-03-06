@@ -16,7 +16,7 @@ Options:
 import os
 from datetime import datetime,timedelta
 
-import unicodecsv
+import csv
 from pyproj import Proj
 from bitstring import Bits
 
@@ -299,6 +299,13 @@ ROUTE_TEXT_COLORS = {
   "ZUG" : "",
 }
 
+DIRECTIONS = {
+    '1': '0',
+    '2': '1',
+    'H': '0',
+    'R': '1',
+}
+
 
 class Hafas2GTFS(object):
     def __init__(self, hafas_dir, out_dir, mapping=None):
@@ -311,14 +318,16 @@ class Hafas2GTFS(object):
     def make_gtfs_files(self):
         self.files = {}
         for gtfs_file, columns in GTFS_FILES.items():
-            self.files[gtfs_file] = unicodecsv.DictWriter(
-                file(os.path.join(self.out_dir, gtfs_file), 'w'),
-                columns
+            file = open(os.path.join(self.out_dir, gtfs_file), 'w', newline='',
+                        encoding='utf8')
+            self.files[gtfs_file] = csv.DictWriter(
+                file,
+                columns,
             )
             self.files[gtfs_file].writeheader()
 
     def get_path(self, name):
-        return os.path.join(self.hafas_dir, name)
+        return os.extsep.join([os.path.join(self.hafas_dir, name), 'txt'])
 
     def get_name(self, name):
         if self.mapping is None:
@@ -349,26 +358,26 @@ class Hafas2GTFS(object):
 
     def write_servicedates(self):
         self.files['calendar.txt'].writerow({
-                                             'service_id': "000000",
-                                             'monday' : '1',
-                                             'tuesday' : '1',
-                                             'wednesday' : '1',
-                                             'thursday' : '1',
-                                             'friday' : '1',
-                                             'saturday' : '1',
-                                             'sunday' : '1',
-                                             'start_date' : self.start,
-                                             'end_date' : self.end
-                                             })
+            'service_id': "000000",
+            'monday' : '1',
+            'tuesday' : '1',
+            'wednesday' : '1',
+            'thursday' : '1',
+            'friday' : '1',
+            'saturday' : '1',
+            'sunday' : '1',
+            'start_date' : self.start.strftime('%Y%m%d'),
+            'end_date' : self.end.strftime('%Y%m%d')
+        })
         for service_id,bitfield in self.services.items():
             y = str(bitfield.bin)
             for z in range(0, len(y)):
                 if y[z] == '1':
                     date = (self.start + timedelta(days=z))
                     self.files['calendar_dates.txt'].writerow({
-                                                           'service_id': service_id,
-                                                           'date': date.strftime('%Y%m%d'),
-                                                           'exception_type' : 1})
+                        'service_id': service_id,
+                        'date': date.strftime('%Y%m%d'),
+                        'exception_type' : 1})
         return None
 
     def write_route(self, meta):
@@ -453,26 +462,27 @@ class Hafas2GTFS(object):
         })
 
     def parse_eckdaten(self):
-        contents = file(self.get_path(self.get_name('ECKDATEN'))).read()
+        contents = open(self.get_path(self.get_name('ECKDATEN'))).read()
         data = contents.splitlines()
         self.start = datetime.strptime(data[0], '%d.%m.%Y')
         self.end = datetime.strptime(data[1], '%d.%m.%Y')
         self.name = data[1]
 
     def parse_bfkoord_geo(self):
-        for line in file(self.get_path(self.get_name('BFKOORD_GEO'))):
+        for line in open(self.get_path(self.get_name('BFKOORD_GEO')),
+                         encoding='iso-8859-1'):
             bla = {
-              'stop_id': int(line[:7]),
-              'stop_lon': line[9:18].strip(),
-              'stop_lat': line[20:29].strip(),
-              'stop_name': line[39:].strip().decode('iso-8859-1').encode('utf8')
+              'stop_id': int(line[:8]),
+              'stop_lon': line[8:17].strip(),
+              'stop_lat': line[19:28].strip(),
+              'stop_name': line[39:].strip()
             }
             self.write_stop(bla)
 
 
     def parse_bitfield(self):
         self.services = {}
-        for line in file(self.get_path(self.get_name('BITFELD'))):
+        for line in open(self.get_path(self.get_name('BITFELD'))):
             service_id = line[:6]
             # "For technical reasons 2 bits are inserted directly
             # before the first day of the start of the timetable period
@@ -481,11 +491,12 @@ class Hafas2GTFS(object):
             self.services[service_id] = Bits(hex=line[6:])[2:]
 
     def parse_infotext(self):
-      infotext = {}
-      for line in file(self.get_path(self.get_name('INFOTEXT_DE'))):
-        infotext[line[0:7]] = line[8:].strip().decode('iso-8859-1').encode('utf8')
+        infotext = {}
+        for line in open(self.get_path(self.get_name('INFOTEXT_DE')),
+                         encoding='iso-8859-1'):
+            infotext[line[0:7]] = line[8:].strip()
 
-      return infotext
+        return infotext
 
     def parse_fplan(self):
         state = 'meta'
@@ -493,20 +504,20 @@ class Hafas2GTFS(object):
         linenumber = 0
         curtripid = 0
         service_id = 0
-        for line in file(self.get_path(self.get_name('FPLAN'))):
-            line = line.decode('latin1')
+        for line in open(self.get_path(self.get_name('FPLAN')),
+                         encoding='latin1'):
             linenumber = linenumber +1
             if line.startswith('%'):
                 continue
             if line.startswith('*'):
                 if not state == 'meta':
                     if meta != {}:
-                      self.write_trip(route_id, service_id, meta, curtripid)
-                      meta = {}
+                        self.write_trip(route_id, service_id, meta, curtripid)
+                        meta = {}
                 state = 'meta'
                 meta.update(self.parse_fplan_meta(line))
                 if line.startswith('*Z'):
-                  curtripid += 1
+                    curtripid += 1
             else:
                 if not state == 'data':
                     state = 'data'
@@ -575,7 +586,7 @@ class Hafas2GTFS(object):
         nr = line[29:36]
         text = self.infotext[nr].strip()
         if code == "ZN" or code == "RN":
-          return {'trainnumber' : text}
+            return {'trainnumber' : text}
         return {}
 
     def parse_fplan_meta_L(self, line):
@@ -584,8 +595,10 @@ class Hafas2GTFS(object):
         }
 
     def parse_fplan_meta_R(self, line):
+        direction = line[3:4].strip()
+        direction = DIRECTIONS.get(direction, direction)
         return {
-            'direction': line[3:4].strip()
+            'direction': direction
         }
 
 
