@@ -305,6 +305,9 @@ class ServiceTrip:
         self.begin_time = begin_time
         self.end_time = end_time
 
+    def __repr__(self):
+        return self.no
+
 
 class Agency:
     def __init__(self, code, mode, agency_id, agency_name, agency_code):
@@ -326,6 +329,7 @@ class Hafas2GTFS(object):
         self.mapping = mapping
         self.route_counter = 0
         self.routes = {}
+        self.service_id_new = 0
 
     def make_gtfs_files(self):
         self.files = {}
@@ -359,8 +363,8 @@ class Hafas2GTFS(object):
         self.service_id = self.parse_eckdaten()
         self.infotext = self.parse_infotext()
         self.parse_bitfield()
-        self.write_servicedates()
         self.parse_fplan()
+        self.write_servicedates()
         self.write_agency()
         self.close()
 
@@ -501,7 +505,7 @@ class Hafas2GTFS(object):
             'stop_headsign': '',
             'pickup_type': '0',
             'drop_off_type': '0',
-            'shape_dist_traveled': ''
+            'shape_dist_traveled': '',
         })
 
     def parse_eckdaten(self):
@@ -565,16 +569,24 @@ class Hafas2GTFS(object):
             }
             self.write_stop(stop)
 
-
     def parse_bitfield(self):
         self.services = {}
+        self.bitfields = {}
         for line in open(self.get_path(self.get_name('BITFELD'))):
             service_id = line[:6]
             # "For technical reasons 2 bits are inserted directly
             # before the first day of the start of the timetable period
             # and two bits directly after the last day at the end of the
             # timetable period."
-            self.services[service_id] = Bits(hex=line[6:])[2:]
+            bits = Bits(hex=line[6:])[2:]
+            self.services[service_id] = bits
+            self.bitfields[bits] = service_id
+        #  add dummy bitfield for all days
+        service_id = '000000'
+        bits_ones = ~Bits(length=bits.length)
+        self.services[service_id] = bits_ones
+        self.bitfields[bits_ones] = service_id
+
 
     def parse_infotext(self):
         infotext = {}
@@ -628,8 +640,23 @@ class Hafas2GTFS(object):
 
     def write_trips(self):
         service_trips = self.meta.get('service_trips', list())
-        for service_trip in service_trips:
+        n_service_trips = len(service_trips)
+        if n_service_trips > 1:
+            for i in range(n_service_trips-1):
+                self.combine_verkehrstage(i, service_trips, n_service_trips)
+
+        for i, service_trip in enumerate(service_trips):
+            #if len(service_trips) > 1:
+                ##print(self.hafas_trip_id, service_trip.begin, service_trip.begin_time, service_trip.end, service_trip.end_time)
+                #if i > 0 and service_trip.begin != service_trips[i-1].end:
+                    #raise
+                #if i +1 < len(service_trips) and service_trip.end != service_trips[i+1].begin:
+                    #raise
+
             service_id = service_trip.no or "000000"
+            bits = self.services[service_id]
+            if not bits:
+                continue
             self.write_trip(service_id,
                             self.meta)
             trips_started = False
@@ -654,6 +681,67 @@ class Hafas2GTFS(object):
                         break
             self.trip_id += 1
         self.hafas_trip_id += 1
+
+    def combine_verkehrstage(self, i, service_trips, n_service_trips):
+        #print(self.trip_id, i)
+        begin_service_trip = service_trips[i]
+        j = i + 1
+        end_service_trip = service_trips[j]
+        self.combine_verkehrstage_inner(j,
+                                        service_trips,
+                                        begin_service_trip,
+                                        end_service_trip,
+                                        n_service_trips)
+
+    def combine_verkehrstage_inner(self,
+                                   j,
+                                   service_trips,
+                                   begin_service_trip,
+                                   end_service_trip,
+                                   n_service_trips):
+        begin = begin_service_trip.begin
+        begin_time = begin_service_trip.begin_time
+        bits1 = self.services[begin_service_trip.no]
+
+        end = end_service_trip.end
+        end_time = end_service_trip.end_time
+        bits2 = self.services[end_service_trip.no]
+        #  bitvise operations
+        common_days = bits1 & bits2
+        only_1 = ~bits2 & bits1
+        only_2 = ~bits1 & bits2
+        #  get the according service_ids
+        service_id_1 = self.get_new_service_id(only_1)
+        service_id_2 = self.get_new_service_id(only_2)
+        begin_service_trip.no = service_id_1
+        end_service_trip.no = service_id_2
+        #  create a new trip for the common days
+        service_id_common = self.get_new_service_id(common_days)
+        #print(service_id_1, service_id_2, service_id_common)
+        common_service_trip = ServiceTrip(no=service_id_common,
+                                          begin=begin,
+                                          end=end,
+                                          begin_time=begin_time,
+                                          end_time=end_time)
+        service_trips.append(common_service_trip)
+
+        if j + 1 < n_service_trips:
+            j += 1
+            end_service_trip = service_trips[j]
+            self.combine_verkehrstage_inner(j,
+                                            service_trips,
+                                           common_service_trip,
+                                           end_service_trip,
+                                           n_service_trips)
+
+    def get_new_service_id(self, bits):
+        service_id = self.bitfields.get(bits)
+        if not service_id:
+            service_id = f'{self.service_id_new:05}'
+            self.services[service_id] = bits
+            self.bitfields[bits] = service_id
+            self.service_id_new -= 1
+        return service_id
 
 
     def parse_schedule(self, line):
