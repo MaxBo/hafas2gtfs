@@ -36,21 +36,10 @@ def convert_gk(x, y):
     return lon, lat
 
 
-GTFS_FILES = (
-    'agency.txt',
-    'calendar.txt',
-    'calendar_dates.txt',
-    'routes.txt',
-    'shapes.txt',
-    'stop_times.txt',
-    'stops.txt',
-    'trips.txt',
-)
-
 GTFS_FILES = {
     'agency.txt': ('agency_id', 'agency_name', 'agency_url', 'agency_timezone', 'agency_lang', 'agency_phone'),
     'routes.txt': ('route_id', 'agency_id', 'route_short_name', 'route_long_name', 'route_desc', 'route_type', 'route_url', 'route_color', 'route_text_color'),
-    'trips.txt': ('route_id', 'service_id', 'trip_id', 'trip_headsign', 'trip_short_name', 'direction_id', 'block_id', 'shape_id'),
+    'trips.txt': ('route_id', 'service_id', 'trip_id', 'trip_headsign', 'trip_short_name', 'direction_id', 'block_id', 'shape_id', 'trip_code', 'info_text', 'hafas_trip_id'),
     'stop_times.txt': ('trip_id', 'arrival_time', 'departure_time', 'stop_id', 'stop_sequence', 'stop_headsign', 'pickup_type', 'drop_off_type', 'shape_dist_traveled'),
     'stops.txt': ('stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 'zone_id', 'stop_url', 'location_type', 'parent_station'),
     'calendar.txt': ('service_id', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'start_date', 'end_date'),
@@ -305,6 +294,29 @@ DIRECTIONS = {
     'H': '0',
     'R': '1',
 }
+from collections import namedtuple
+
+
+class ServiceTrip:
+    def __init__(self, no, begin, end, begin_time=None, end_time=None):
+        self.no = no
+        self.begin = begin
+        self.end = end
+        self.begin_time = begin_time
+        self.end_time = end_time
+
+
+class Agency:
+    def __init__(self, code, mode, agency_id, agency_name, agency_code):
+        self.code = code
+        self.mode = mode
+        self.agency_id = agency_id
+        self.agency_name = agency_name
+        self.agency_code = agency_code
+        self.routes = []
+
+    def __repr__(self):
+        return self.agency_name
 
 
 class Hafas2GTFS(object):
@@ -320,11 +332,17 @@ class Hafas2GTFS(object):
         for gtfs_file, columns in GTFS_FILES.items():
             file = open(os.path.join(self.out_dir, gtfs_file), 'w', newline='',
                         encoding='utf8')
-            self.files[gtfs_file] = csv.DictWriter(
+            writer = csv.DictWriter(
                 file,
                 columns,
             )
-            self.files[gtfs_file].writeheader()
+            writer.file = file
+            self.files[gtfs_file] = writer
+            writer.writeheader()
+
+    def close(self):
+        for writer in self.files.values():
+            writer.file.close()
 
     def get_path(self, name):
         return os.extsep.join([os.path.join(self.hafas_dir, name), 'txt'])
@@ -336,25 +354,28 @@ class Hafas2GTFS(object):
 
     def create(self):
         self.make_gtfs_files()
+        self.parse_betreiber()
         self.parse_bfkoord_geo()
         self.service_id = self.parse_eckdaten()
         self.infotext = self.parse_infotext()
         self.parse_bitfield()
         self.write_servicedates()
-        self.agency_id = self.write_agency()
         self.parse_fplan()
+        self.write_agency()
+        self.close()
 
     def write_agency(self):
-        self.agency_id = '1'
-        self.files['agency.txt'].writerow({
-            'agency_id': self.agency_id,
-            'agency_name': 'Agency Name',
+        writer = self.files['agency.txt']
+        #  add default agency
+        for agency in self.agencies.values():
+            writer.writerow({
+            'agency_id': agency.agency_id,
+            'agency_name': agency.agency_name,
             'agency_url': '',
             'agency_timezone': '',
             'agency_lang': '',
             'agency_phone': ''
         })
-        return self.agency_id
 
     def write_servicedates(self):
         self.files['calendar.txt'].writerow({
@@ -381,38 +402,60 @@ class Hafas2GTFS(object):
         return None
 
     def write_route(self, meta):
-        route_id = meta.get('line_number')
+        trip_code = meta.get('trip_no')
+        administration = meta['administration']
+        agency_id = self.line2agency.get(administration)
+        if not agency_id:
+            agency = self.agencies.get(administration)
+            if not agency:
+                agency = self.add_agency(betreiber=administration,
+                                agency_id=administration,
+                                mode='',
+                                agency_name=administration,
+                                unique=False)
+            agency_id = agency.agency_id
+            self.line2agency[administration] = administration
+        if trip_code:
+            route_id = f'{agency_id}_{trip_code}'
+        else:
+            route_id = agency_id
         if route_id is None:
             self.route_counter += 1
             route_id = self.route_counter
         if route_id in self.routes:
             return self.routes[route_id]
         self.routes[route_id] = route_id
+
         self.files['routes.txt'].writerow({
             'route_id': route_id,
-            'agency_id': self.agency_id,
+            'agency_id': agency_id,
             'route_short_name': meta['mean_of_transport'],
-            'route_long_name': (meta['mean_of_transport']  + " " if meta['trainnumber'].isdigit() else "") + meta['trainnumber'],
+            'route_long_name': (meta['mean_of_transport']  + " "
+                                if meta['trainnumber'].isdigit() else "") + meta['trainnumber'],
             'route_desc': '',
             'route_type': str(ROUTE_TYPES.get(meta['mean_of_transport'], 0)),
             'route_url': '',
             'route_color': ROUTE_COLORS.get(meta['mean_of_transport'], "000000"),
-            'route_text_color': ROUTE_TEXT_COLORS.get(meta['mean_of_transport'], "000000")
+            'route_text_color': ROUTE_TEXT_COLORS.get(meta['mean_of_transport'], "000000"),
         })
-        return route_id
+        self.route_id = route_id
 
-    def write_trip(self, route_id, service_id, meta, tripid):
+    def write_trip(self, service_id, meta):
+        trip_code = meta.get('trip_no') or meta.get('trainnumber')
+        info_text = meta.get('info_text', '')
         self.files['trips.txt'].writerow({
-            'route_id': route_id,
+            'route_id': self.route_id,
             'service_id': service_id,
-            'trip_id': tripid,
+            'trip_id': self.trip_id,
             'trip_headsign': meta['headsign'],
             'trip_short_name': meta['trainnumber'],
             'direction_id': meta.get('direction', '0'),
             'block_id': '',
-            'shape_id': ''
+            'shape_id': '',
+            'trip_code': trip_code,
+            'info_text': info_text,
+            'hafas_trip_id': self.hafas_trip_id,
         })
-        return tripid
 
     def get_gtfs_time(self, time):
         if time is None:
@@ -438,7 +481,7 @@ class Hafas2GTFS(object):
         })
         return stop_line['stop_id']
 
-    def write_stop_time(self, trip_id, stop_sequence, stop_line):
+    def write_stop_time(self, stop_sequence, stop_line):
         stop_id = stop_line['stop_id']
 
         arrival_time = self.get_gtfs_time(stop_line['arrival_time'])
@@ -450,7 +493,7 @@ class Hafas2GTFS(object):
             departure_time = arrival_time
 
         self.files['stop_times.txt'].writerow({
-            'trip_id': trip_id,
+            'trip_id': self.trip_id,
             'arrival_time': arrival_time,
             'departure_time': departure_time,
             'stop_id': stop_id,
@@ -468,16 +511,59 @@ class Hafas2GTFS(object):
         self.end = datetime.strptime(data[1], '%d.%m.%Y')
         self.name = data[1]
 
+    def parse_betreiber(self):
+        """Parse the agencies"""
+        self.agencies = {}
+        self.agency_ids = {}
+        self.line2agency = {}
+        self.agency_code_suffix = {}
+        for line in open(self.get_path(self.get_name('BETRIEB')),
+                         encoding='iso-8859-1'):
+            betreiber = line[:5]
+            agency_id = line[17:20].strip()
+            agency = self.agencies.get(betreiber)
+            if not agency:
+                mode = line[9:12]
+                agency_name = line[25:].strip().strip("'")
+                agency = self.add_agency(betreiber, agency_id,
+                                         mode, agency_name)
+            else:
+                routes = line[8:].strip().split(' ')
+                agency.routes.extend(routes)
+                for route in routes:
+                    self.line2agency[route] = agency.agency_id
+
+    def add_agency(self, betreiber, agency_id, mode, agency_name, unique=True):
+        agency = Agency(code=betreiber,
+                        mode=mode,
+                        agency_id=agency_id,
+                        agency_name=agency_name,
+                        agency_code=agency_id)
+        if unique:
+            self.make_agency_id_unique(agency, agency_id)
+        self.agencies[betreiber] = agency
+        self.agency_ids[agency.agency_id] = None
+        return agency
+
+    def make_agency_id_unique(self, agency, agency_id):
+        # append number, if agency_id already exists
+        if agency.agency_id in self.agency_ids:
+            agency_code_suffix = self.agency_code_suffix.get(agency.agency_code, 0)
+            agency_code_suffix += 1
+            self.agency_code_suffix[agency.agency_code] = agency_code_suffix
+            agency.agency_id = f'{agency.agency_code}_{agency_code_suffix}'
+
+
     def parse_bfkoord_geo(self):
         for line in open(self.get_path(self.get_name('BFKOORD_GEO')),
                          encoding='iso-8859-1'):
-            bla = {
+            stop = {
               'stop_id': int(line[:8]),
               'stop_lon': line[8:17].strip(),
               'stop_lat': line[19:28].strip(),
               'stop_name': line[39:].strip()
             }
-            self.write_stop(bla)
+            self.write_stop(stop)
 
 
     def parse_bitfield(self):
@@ -500,35 +586,75 @@ class Hafas2GTFS(object):
 
     def parse_fplan(self):
         state = 'meta'
-        meta = {}
+        self.meta = {}
+        self.stop_informations = []
         linenumber = 0
-        curtripid = 0
+        self.trip_id = 0
+        self.hafas_trip_id = 0
+        self.route_id = 0
         service_id = 0
         for line in open(self.get_path(self.get_name('FPLAN')),
                          encoding='latin1'):
-            linenumber = linenumber +1
+            linenumber += 1
             if line.startswith('%'):
                 continue
             if line.startswith('*'):
-                if not state == 'meta':
-                    if meta != {}:
-                        self.write_trip(route_id, service_id, meta, curtripid)
-                        meta = {}
-                state = 'meta'
-                meta.update(self.parse_fplan_meta(line))
                 if line.startswith('*Z'):
-                    curtripid += 1
+                    #  new trip starts
+                    #  write data for previous trips
+                    self.write_trips()
+                    #  reset data
+                    self.meta = {}
+                    self.stop_informations = []
+                state = 'meta'
+                self.meta.update(self.parse_fplan_meta(line))
+
             else:
                 if not state == 'data':
+                    #  beginning of data block
+
+
                     state = 'data'
                     stop_sequence = 0
-                    route_id = self.write_route(meta)
-                    service_id = meta['service_id']
-                    if service_id == "": service_id = "000000"
+                    self.write_route(self.meta)
                 stop_sequence += 1
                 stop_line_info = self.parse_schedule(line)
-                self.write_stop_time(curtripid, stop_sequence, stop_line_info)
-                meta['headsign'] = stop_line_info['stop_name']
+                self.stop_informations.append(stop_line_info)
+                self.meta['headsign'] = stop_line_info['stop_name']
+
+        #  Finally write last trips
+        self.write_trips()
+
+
+    def write_trips(self):
+        service_trips = self.meta.get('service_trips', list())
+        for service_trip in service_trips:
+            service_id = service_trip.no or "000000"
+            self.write_trip(service_id,
+                            self.meta)
+            trips_started = False
+            for stop_sequence, stop_line in enumerate(self.stop_informations):
+                stop_id = stop_line['stop_id']
+                if not trips_started and not stop_id == service_trip.begin:
+                    # if a stop occures more than once in a route,
+                    # the departure_time for the starting stop is defined
+                    # otherwise, service_trip.begin_time is None
+                    if ((not service_trip.begin_time) or
+                        (service_trip.begin_time == stop_line.get('departure_time'))):
+                        continue
+                trips_started = True
+                self.write_stop_time(stop_sequence + 1,
+                                     stop_line)
+                if stop_id == service_trip.end:
+                    # if a stop occures more than once in a route,
+                    # the arrival_time for the final stop is defined
+                    # otherwise, service_trip.end_time is None
+                    if ((not service_trip.end_time) or
+                        (service_trip.end_time == stop_line.get('arrival_time'))):
+                        break
+            self.trip_id += 1
+        self.hafas_trip_id += 1
+
 
     def parse_schedule(self, line):
         """
@@ -556,8 +682,8 @@ class Hafas2GTFS(object):
 
     def parse_fplan_meta_Z(self, line):
         return {
-            'trainnumber' : str(int(line[3:8])),
-            'line_number': line[3:8] + "." + line[9:15],
+            'trainnumber' : line[3:8].strip(),
+            #'line_number': line[3:8] + "." + line[9:15],
             'service_number': line[3:8] + "." + line[9:15] + "." + line[18:21],
             'administration': line[9:15],
             'number_intervals': line[22:25],
@@ -571,14 +697,19 @@ class Hafas2GTFS(object):
 
     def parse_fplan_meta_A(self, line):
         # discern A und A VE
+        service_trips = self.meta.get('service_trips', list())
+        meta_type = line[3:5]
+        if meta_type == 'VE':
+            begin = int(line[6:14].strip())
+            end = int(line[14:22].strip())
+            service_id = line[22:28].strip()
+            service_trip = ServiceTrip(service_id, begin, end)
+            if len(line) >= 30:
+                service_trip.begin_time = self.parse_time(line[31:35])
+                service_trip.end_time = self.parse_time(line[38:42])
+            service_trips.append(service_trip)
         return {
-          'service_id' : line[22:28].strip()
-        }
-
-    def parse_fplan_meta_A(self, line):
-        # discern A und A VE
-        return {
-          'service_id' : line[22:28].strip()
+            'service_trips': service_trips,
         }
 
     def parse_fplan_meta_I(self, line):
@@ -586,12 +717,12 @@ class Hafas2GTFS(object):
         nr = line[29:36]
         text = self.infotext[nr].strip()
         if code == "ZN" or code == "RN":
-            return {'trainnumber' : text}
+            return {'info_text' : text}
         return {}
 
     def parse_fplan_meta_L(self, line):
         return {
-          'trainnumber' : line[3:12].strip()
+          'trip_no' : line[3:12].strip()
         }
 
     def parse_fplan_meta_R(self, line):
