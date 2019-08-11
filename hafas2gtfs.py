@@ -825,9 +825,17 @@ def main(hafas_dir, out_dir, options=None):
     if options is None:
         options = {}
     config = {}
+    config['mapping'] = {'FPLAN':'fahrten',#
+                         'BITFELD':'bitfield',
+                         'BFKOORD_GEO':'bfkoord',
+                         'ECKDATEN':'eckdaten',
+                         'INFOTEXT_DE':'infotext',
+                         'DURCHBINDUNGEN': 'duchbi',}
+
     if options.get('--mapping'):
-        config['mapping'] = dict([o.split(':') for o in options.get(
+        mapping = dict([o.split(':') for o in options.get(
                                  '--mapping').split(',')])
+        config['mapping'].update(mapping)
     h2g = Hafas2GTFS(hafas_dir, out_dir, **config)
     h2g.create()
 
