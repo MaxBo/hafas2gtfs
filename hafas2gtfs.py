@@ -42,7 +42,7 @@ GTFS_FILES = {
     'routes.txt': ('route_id', 'agency_id',
                    'route_short_name', 'route_long_name', 'route_desc',
                    'route_type', 'route_url', 'route_color', 'route_text_color',
-                   'basic_route_type', 'gattung_name', 'gattung_code',
+                   'detailed_route_type', 'gattung_name', 'gattung_code',
                    'gattung_bezeichnung', 'gattung_zuschlag', 'gattung_flag',
                    'gattung_tarifgruppe'),
     'trips.txt': ('route_id', 'service_id', 'trip_id', 'trip_headsign',
@@ -361,7 +361,7 @@ class Durchbindung:
         return f'({self.trainnumber1}, {self.administration1})->({self.trainnumber2}, {self.administration2})'
 
 class Gattung:
-    produktklasse2GTFSBasicroute_type = {0: 2,
+    produktklasse2GTFSroute_type = {0: 2,
                                          1: 2,
                                          2: 2,
                                          3: 2,
@@ -373,19 +373,19 @@ class Gattung:
                                          9: 3,
                                          }
 
-    produktklasse2GTFSroute_type = {0: 101,
-                                       1: 102,
-                                       2: 103,
-                                       3: 106,
-                                       4: 109,
-                                       5: 700,
-                                       6: 1000,
-                                       7: 400,
-                                       8: 900,
-                                       9: 715,
-                                       }
+    produktklasse2GTFSdetailed_route_type = {0: 101,
+                                             1: 102,
+                                             2: 103,
+                                             3: 106,
+                                             4: 109,
+                                             5: 700,
+                                             6: 1000,
+                                             7: 400,
+                                             8: 900,
+                                             9: 715,
+                                             }
 
-    name2GTFSroute_type = {'SEV-Bus': 714,
+    name2GTFSdetailed_route_type = {'SEV-Bus': 714,
                            'Zahnradbahn': 1400,
                            'Schwebebahn': 405,
                            'Seilbahn': 1300,
@@ -394,6 +394,17 @@ class Gattung:
                            'ÖBB-Intercitybus': 700,
                            'FernBus': 700,
                            'Flugzeug': 1100,
+                           }
+
+    name2GTFSroute_type = {'SEV-Bus': 3,
+                           'Zahnradbahn': 7,
+                           'Schwebebahn': 7,
+                           'Seilbahn': 6,
+                           'Oberleitungs-Bus': 3,
+                           'IC Bus': 3,
+                           'ÖBB-Intercitybus': 3,
+                           'FernBus': 3,
+                           'Flugzeug': 6,
                            }
 
     def __init__(self,
@@ -418,16 +429,18 @@ class Gattung:
         return self.gattungscode
 
     @property
-    def route_type(self):
-        route_type = self.name2GTFSroute_type.get(
+    def detailed_route_type(self):
+        route_type = self.name2GTFSdetailed_route_type.get(
             self.name,
-            self.produktklasse2GTFSroute_type.get(self.produktklasse, 700))
+            self.produktklasse2GTFSdetailed_route_type.get(self.produktklasse, 700))
         return route_type
 
     @property
-    def basic_route_type(self):
-        return self.produktklasse2GTFSBasicroute_type.get(self.produktklasse,
-                                                          3)
+    def route_type(self):
+        route_type = self.name2GTFSroute_type.get(
+            self.name,
+            self.produktklasse2GTFSroute_type.get(self.produktklasse, 3))
+        return route_type
 
 
 class Hafas2GTFS:
@@ -551,7 +564,7 @@ class Hafas2GTFS:
             'route_long_name': (meta['mean_of_transport']  + " "
                                 if meta['trainnumber'].isdigit() else "") + meta['trainnumber'],
             'route_desc': '',
-            'basic_route_type': gattung.basic_route_type,
+            'detailed_route_type': gattung.detailed_route_type,
             'route_url': '',
             'route_color': ROUTE_COLORS.get(meta['mean_of_transport'], "000000"),
             'route_text_color': ROUTE_TEXT_COLORS.get(meta['mean_of_transport'], "000000"),
