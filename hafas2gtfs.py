@@ -37,12 +37,26 @@ def convert_gk(x, y):
 
 
 GTFS_FILES = {
-    'agency.txt': ('agency_id', 'agency_name', 'agency_url', 'agency_timezone', 'agency_lang', 'agency_phone'),
-    'routes.txt': ('route_id', 'agency_id', 'route_short_name', 'route_long_name', 'route_desc', 'route_type', 'route_url', 'route_color', 'route_text_color'),
-    'trips.txt': ('route_id', 'service_id', 'trip_id', 'trip_headsign', 'trip_short_name', 'direction_id', 'block_id', 'shape_id', 'trip_code', 'info_text', 'hafas_trip_id'),
-    'stop_times.txt': ('trip_id', 'arrival_time', 'departure_time', 'stop_id', 'stop_sequence', 'stop_headsign', 'pickup_type', 'drop_off_type', 'shape_dist_traveled'),
-    'stops.txt': ('stop_id', 'stop_code', 'stop_name', 'stop_desc', 'stop_lat', 'stop_lon', 'zone_id', 'stop_url', 'location_type', 'parent_station'),
-    'calendar.txt': ('service_id', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'start_date', 'end_date'),
+    'agency.txt': ('agency_id', 'agency_name', 'agency_url', 'agency_timezone',
+                   'agency_lang', 'agency_phone'),
+    'routes.txt': ('route_id', 'agency_id',
+                   'route_short_name', 'route_long_name', 'route_desc',
+                   'route_type', 'route_url', 'route_color', 'route_text_color',
+                   'basic_route_type', 'gattung_name', 'gattung_code',
+                   'gattung_bezeichnung', 'gattung_zuschlag', 'gattung_flag',
+                   'gattung_tarifgruppe'),
+    'trips.txt': ('route_id', 'service_id', 'trip_id', 'trip_headsign',
+                  'trip_short_name', 'direction_id', 'block_id', 'shape_id',
+                  'trip_code', 'info_text', 'hafas_trip_id'),
+    'stop_times.txt': ('trip_id', 'arrival_time', 'departure_time', 'stop_id',
+                       'stop_sequence', 'stop_headsign',
+                       'pickup_type', 'drop_off_type', 'shape_dist_traveled'),
+    'stops.txt': ('stop_id', 'stop_code', 'stop_name', 'stop_desc',
+                  'stop_lat', 'stop_lon', 'zone_id', 'stop_url',
+                  'location_type', 'parent_station'),
+    'calendar.txt': ('service_id', 'monday', 'tuesday', 'wednesday',
+                     'thursday', 'friday', 'saturday', 'sunday',
+                     'start_date', 'end_date'),
     'calendar_dates.txt': ('service_id', 'date', 'exception_type')
 }
 
@@ -298,12 +312,16 @@ from collections import namedtuple
 
 
 class ServiceTrip:
-    def __init__(self, no, begin, end, begin_time=None, end_time=None):
+    def __init__(self, no,
+                 begin, end,
+                 begin_time=None, end_time=None,
+                 block_id=None):
         self.no = no
         self.begin = begin
         self.end = end
         self.begin_time = begin_time
         self.end_time = end_time
+        self.block_id = block_id
 
     def __repr__(self):
         return self.no
@@ -322,7 +340,97 @@ class Agency:
         return self.agency_name
 
 
-class Hafas2GTFS(object):
+class Durchbindung:
+    def __init__(self,
+                 trainnumber1,
+                 administration1,
+                 trainnumber2,
+                 administration2,
+                 service_id,
+                 stop_id,
+                 no):
+        self.trainnumber1 = trainnumber1
+        self.administration1 = administration1
+        self.trainnumber2 = trainnumber2
+        self.administration2 = administration2
+        self.service_id = service_id
+        self.stop_id = stop_id
+        self.no = no
+
+    def __repr__(self):
+        return f'({self.trainnumber1}, {self.administration1})->({self.trainnumber2}, {self.administration2})'
+
+class Gattung:
+    produktklasse2GTFSBasicroute_type = {0: 2,
+                                         1: 2,
+                                         2: 2,
+                                         3: 2,
+                                         4: 2,
+                                         5: 3,
+                                         6: 4,
+                                         7: 1,
+                                         8: 0,
+                                         9: 3,
+                                         }
+
+    produktklasse2GTFSroute_type = {0: 101,
+                                       1: 102,
+                                       2: 103,
+                                       3: 106,
+                                       4: 109,
+                                       5: 700,
+                                       6: 1000,
+                                       7: 400,
+                                       8: 900,
+                                       9: 715,
+                                       }
+
+    name2GTFSroute_type = {'SEV-Bus': 714,
+                           'Zahnradbahn': 1400,
+                           'Schwebebahn': 405,
+                           'Seilbahn': 1300,
+                           'Oberleitungs-Bus': 800,
+                           'IC Bus': 700,
+                           'ÖBB-Intercitybus': 700,
+                           'FernBus': 700,
+                           'Flugzeug': 1100,
+                           }
+
+    def __init__(self,
+                 code,
+                 produktklasse,
+                 tarifgruppe,
+                 ausgabesteuerung,
+                 bezeichnung,
+                 zuschlag,
+                 flag,
+                 name):
+        self.code = code
+        self.produktklasse = produktklasse
+        self.tarifgruppe = tarifgruppe
+        self.ausgabesteuerung = ausgabesteuerung
+        self.bezeichnung = bezeichnung
+        self.zuschlag = zuschlag
+        self.flag = flag
+        self.name = name
+
+    def __repr__(self):
+        return self.gattungscode
+
+    @property
+    def route_type(self):
+        route_type = self.name2GTFSroute_type.get(
+            self.name,
+            self.produktklasse2GTFSroute_type.get(self.produktklasse, 700))
+        return route_type
+
+    @property
+    def basic_route_type(self):
+        return self.produktklasse2GTFSBasicroute_type.get(self.produktklasse,
+                                                          3)
+
+
+class Hafas2GTFS:
     def __init__(self, hafas_dir, out_dir, mapping=None):
         self.hafas_dir = hafas_dir
         self.out_dir = out_dir
@@ -359,7 +467,9 @@ class Hafas2GTFS(object):
     def create(self):
         self.make_gtfs_files()
         self.parse_betreiber()
+        self.parse_zugart()
         self.parse_bfkoord_geo()
+        self.parse_durchbindungen()
         self.service_id = self.parse_eckdaten()
         self.infotext = self.parse_infotext()
         self.parse_bitfield()
@@ -430,6 +540,10 @@ class Hafas2GTFS(object):
             return self.routes[route_id]
         self.routes[route_id] = route_id
 
+        gattung = self.gattungen.get(meta['mean_of_transport'],
+                                     self.gattungen['UUU'])
+
+
         self.files['routes.txt'].writerow({
             'route_id': route_id,
             'agency_id': agency_id,
@@ -437,14 +551,21 @@ class Hafas2GTFS(object):
             'route_long_name': (meta['mean_of_transport']  + " "
                                 if meta['trainnumber'].isdigit() else "") + meta['trainnumber'],
             'route_desc': '',
-            'route_type': str(ROUTE_TYPES.get(meta['mean_of_transport'], 0)),
+            'basic_route_type': gattung.basic_route_type,
             'route_url': '',
             'route_color': ROUTE_COLORS.get(meta['mean_of_transport'], "000000"),
             'route_text_color': ROUTE_TEXT_COLORS.get(meta['mean_of_transport'], "000000"),
+            'route_type': gattung.route_type,
+            'gattung_name': gattung.name,
+            'gattung_code': gattung.code,
+            'gattung_zuschlag': gattung.zuschlag,
+            'gattung_flag': gattung.flag,
+            'gattung_bezeichnung': gattung.bezeichnung,
+            'gattung_tarifgruppe': gattung.tarifgruppe,
         })
         self.route_id = route_id
 
-    def write_trip(self, service_id, meta):
+    def write_trip(self, service_id, meta, block_id):
         trip_code = meta.get('trip_no') or meta.get('trainnumber')
         info_text = meta.get('info_text', '')
         self.files['trips.txt'].writerow({
@@ -454,7 +575,7 @@ class Hafas2GTFS(object):
             'trip_headsign': meta['headsign'],
             'trip_short_name': meta['trainnumber'],
             'direction_id': meta.get('direction', '0'),
-            'block_id': '',
+            'block_id': block_id,
             'shape_id': '',
             'trip_code': trip_code,
             'info_text': info_text,
@@ -515,6 +636,40 @@ class Hafas2GTFS(object):
         self.end = datetime.strptime(data[1], '%d.%m.%Y')
         self.name = data[1]
 
+    def parse_zugart(self):
+        self.gattungen = {}
+        self.produktwahltexte_deutsch = {}
+        mode = 'GATTUNGEN'
+        for line in open(self.get_path(self.get_name('ZUGART')),
+                         encoding='iso-8859-1'):
+            if line.startswith('%') or not line.strip():
+                continue
+            if line.startswith('<'):
+                mode = 'Produktwahltexte'
+                continue
+            if line.strip() == '<Deutsch>':
+                mode = 'DEUTSCH_PRODUKTWAHL'
+                continue
+
+            if mode == 'GATTUNGEN':
+                code = line[:3].strip()
+                produktklasse = int(line[4:6].strip())
+                tarifgruppe = line[7:8]
+                ausgabesteuerung = int(line[9:11])
+                bezeichnung = line[12:20].strip()
+                zuschlag = int(line[21:22].strip())
+                flag = line[23:24].strip()
+                name = line[25:].strip()
+                gattung = Gattung(code, produktklasse, tarifgruppe,
+                                  ausgabesteuerung, bezeichnung,
+                                  zuschlag, flag, name)
+                self.gattungen[code] = gattung
+
+            if mode == 'DEUTSCH_PRODUKTWAHL':
+                produkt_id = int(line[6:8].strip())
+                name = line[25:].strip().strip('"')
+                self.produktwahltexte_deutsch[produkt_id] = name
+
     def parse_betreiber(self):
         """Parse the agencies"""
         self.agencies = {}
@@ -556,6 +711,25 @@ class Hafas2GTFS(object):
             agency_code_suffix += 1
             self.agency_code_suffix[agency.agency_code] = agency_code_suffix
             agency.agency_id = f'{agency.agency_code}_{agency_code_suffix}'
+
+    def parse_durchbindungen(self):
+        self.durchbindungen = {}
+        durchbindung_id = 1
+        for line in open(self.get_path(self.get_name('DURCHBINDUNGEN')),\
+                         encoding='iso-8859-1'):
+            trainnumber1 = line[:5]
+            administration1 = line[6:12]
+            stop_id = line[13:20]
+            trainnumber2 = line[21:26]
+            administration2 = line[27:33]
+            service_id = line[34:40]
+
+            durchbindung = Durchbindung(trainnumber1, administration1,
+                                        trainnumber2, administration2,
+                                        service_id, stop_id, durchbindung_id)
+            self.durchbindungen[(trainnumber1, administration1)] = durchbindung
+            self.durchbindungen[(trainnumber2, administration2)] = durchbindung
+            durchbindung_id += 1
 
 
     def parse_bfkoord_geo(self):
@@ -637,13 +811,55 @@ class Hafas2GTFS(object):
         #  Finally write last trips
         self.write_trips()
 
-
     def write_trips(self):
+        trainnumber = self.meta.get('trainnumber')
+        administration = self.meta.get('administration')
+        durchbindung = self.durchbindungen.get((trainnumber, administration))
+        if durchbindung:
+            block_id = durchbindung.no
+        else:
+            block_id = None
+
         service_trips = self.meta.get('service_trips', list())
         n_service_trips = len(service_trips)
         if n_service_trips > 1:
             for i in range(n_service_trips-1):
                 self.combine_verkehrstage(i, service_trips, n_service_trips)
+
+        if durchbindung:
+            # split the service_trip, if a durchbindung
+            # is only on certain days
+            new_service_trips = []
+            for service_trip in service_trips:
+                bits1 = self.services[service_trip.no]
+                bits2 = self.services[durchbindung.service_id]
+                #  bitvise operations
+                common_days = bits1 & bits2
+                only_1 = ~bits2 & bits1
+
+                if only_1:
+                    #  if the service_trip has on certain days no durchbindung,
+                    #  set the
+                    service_id_1 = self.get_new_service_id(only_1)
+                    service_trip.no = service_id_1
+
+                    #  and create a new trip for the common days with the block_id
+                    service_id_common = self.get_new_service_id(common_days)
+                    #print(service_id_1, service_id_2, service_id_common)
+                    common_service_trip = ServiceTrip(
+                        no=service_id_common,
+                        begin=service_trip.begin,
+                        end=service_trip.end,
+                        begin_time=service_trip.begin_time,
+                        end_time=service_trip.end_time,
+                        block_id=block_id,
+                    )
+                    new_service_trips.append(common_service_trip)
+                else:
+                    #  otherwise, set the block_id to the existing service_trip
+                    service_trip.block_id = block_id
+
+            service_trips.extend(new_service_trips)
 
         for i, service_trip in enumerate(service_trips):
             #if len(service_trips) > 1:
@@ -658,7 +874,8 @@ class Hafas2GTFS(object):
             if not bits:
                 continue
             self.write_trip(service_id,
-                            self.meta)
+                            self.meta,
+                            service_trip.block_id)
             trips_started = False
             for stop_sequence, stop_line in enumerate(self.stop_informations):
                 stop_id = stop_line['stop_id']
@@ -830,7 +1047,8 @@ def main(hafas_dir, out_dir, options=None):
                          'BFKOORD_GEO':'bfkoord',
                          'ECKDATEN':'eckdaten',
                          'INFOTEXT_DE':'infotext',
-                         'DURCHBINDUNGEN': 'duchbi',}
+                         'DURCHBINDUNGEN': 'durchbi',
+                         'ZUGART': 'zugart',}
 
     if options.get('--mapping'):
         mapping = dict([o.split(':') for o in options.get(
