@@ -550,7 +550,7 @@ class Hafas2GTFS:
             self.route_counter += 1
             route_id = self.route_counter
         if route_id in self.routes:
-            return self.routes[route_id]
+            self.route_id = route_id
         self.routes[route_id] = route_id
 
         gattung = self.gattungen.get(meta['mean_of_transport'],
