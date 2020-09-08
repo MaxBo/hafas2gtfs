@@ -14,6 +14,7 @@ Options:
 
 """
 import os
+import re
 from datetime import datetime,timedelta
 
 import csv
@@ -470,7 +471,10 @@ class Hafas2GTFS:
             writer.file.close()
 
     def get_path(self, name):
-        return os.extsep.join([os.path.join(self.hafas_dir, name), 'txt'])
+        fn = os.path.join(self.hafas_dir, name)
+        if os.path.exists(fn):
+            return fn
+        return os.extsep.join([fn, 'txt'])
 
     def get_name(self, name):
         if self.mapping is None:
@@ -645,9 +649,11 @@ class Hafas2GTFS:
     def parse_eckdaten(self):
         contents = open(self.get_path(self.get_name('ECKDATEN'))).read()
         data = contents.splitlines()
-        self.start = datetime.strptime(data[0], '%d.%m.%Y')
-        self.end = datetime.strptime(data[1], '%d.%m.%Y')
-        self.name = data[1]
+        self.start = datetime.strptime(
+            re.search(r'(\d+.\d+.\d+)', data[1]).group(1), '%d.%m.%Y')
+        self.end = datetime.strptime(
+            re.search(r'(\d+.\d+.\d+)', data[2]).group(1), '%d.%m.%Y')
+        self.name = data[3]
 
     def parse_zugart(self):
         self.gattungen = {}
@@ -670,9 +676,9 @@ class Hafas2GTFS:
                 tarifgruppe = line[7:8]
                 ausgabesteuerung = int(line[9:11])
                 bezeichnung = line[12:20].strip()
-                zuschlag = int(line[21:22].strip())
-                flag = line[23:24].strip()
-                name = line[25:].strip()
+                zuschlag = int(line[20:21].strip())
+                flag = line[22:23].strip()
+                name = line[24:].strip()
                 gattung = Gattung(code, produktklasse, tarifgruppe,
                                   ausgabesteuerung, bezeichnung,
                                   zuschlag, flag, name)
@@ -746,15 +752,17 @@ class Hafas2GTFS:
 
 
     def parse_bfkoord_geo(self):
-        for line in open(self.get_path(self.get_name('BFKOORD_GEO')),
-                         encoding='iso-8859-1'):
-            stop = {
-              'stop_id': int(line[:8]),
-              'stop_lon': line[8:17].strip(),
-              'stop_lat': line[19:28].strip(),
-              'stop_name': line[39:].strip()
-            }
-            self.write_stop(stop)
+        with open(self.get_path(self.get_name('BFKOORD_GEO')),
+                  encoding='iso-8859-1') as f:
+            next(f)
+            for line in f:
+                stop = {
+                  'stop_id': int(line[:8]),
+                  'stop_lon': line[8:17].strip(),
+                  'stop_lat': line[19:28].strip(),
+                  'stop_name': line[39:].strip()
+                }
+                self.write_stop(stop)
 
     def parse_bitfield(self):
         self.services = {}
@@ -791,7 +799,6 @@ class Hafas2GTFS:
         self.trip_id = 0
         self.hafas_trip_id = 0
         self.route_id = 0
-        service_id = 0
         for line in open(self.get_path(self.get_name('FPLAN')),
                          encoding='latin1'):
             linenumber += 1
@@ -811,8 +818,6 @@ class Hafas2GTFS:
             else:
                 if not state == 'data':
                     #  beginning of data block
-
-
                     state = 'data'
                     stop_sequence = 0
                     self.write_route(self.meta)
