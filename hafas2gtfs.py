@@ -3,18 +3,20 @@
 Hafas2GTFS
 
 Usage:
-  hafas2gtfs.py <input_dir> <output_dir> [--mapping=<mp>]
+  hafas2gtfs.py <input_dir> <output_dir> [--mapping=<mp>] [--tt_wildcard=<wc>]
   hafas2gtfs.py -h | --help
   hafas2gtfs.py --version
 
 Options:
-  -h --help       Show this screen.
-  --version       Show version.
-  --mapping=<mp>  Map filenames
+  -h --help          Show this screen.
+  --version          Show version.
+  --mapping=<mp>     Map filenames
+  --tt_wildcard=<wc> wildcard for timetables, all matching files will be parsed, overrides 'FPLAN' mapping
 
 """
 import os
 import re
+import glob
 from datetime import datetime,timedelta
 
 import csv
@@ -445,10 +447,11 @@ class Gattung:
 
 
 class Hafas2GTFS:
-    def __init__(self, hafas_dir, out_dir, mapping=None):
+    def __init__(self, hafas_dir, out_dir, tt_wildcard=None, mapping=None):
         self.hafas_dir = hafas_dir
         self.out_dir = out_dir
         self.mapping = mapping
+        self.tt_wildcard = tt_wildcard
         self.route_counter = 0
         self.routes = {}
         self.service_id_new = 0
@@ -799,32 +802,37 @@ class Hafas2GTFS:
         self.trip_id = 0
         self.hafas_trip_id = 0
         self.route_id = 0
-        for line in open(self.get_path(self.get_name('FPLAN')),
-                         encoding='latin1'):
-            linenumber += 1
-            if line.startswith('%'):
-                continue
-            if line.startswith('*'):
-                if line.startswith('*Z'):
-                    #  new trip starts
-                    #  write data for previous trips
-                    self.write_trips()
-                    #  reset data
-                    self.meta = {}
-                    self.stop_informations = []
-                state = 'meta'
-                self.meta.update(self.parse_fplan_meta(line))
+        if self.tt_wildcard:
+            pwc = os.path.join(self.get_path(''), self.tt_wildcard)
+            fns = glob.glob(os.path.join(self.get_path(''), self.tt_wildcard))
+        else:
+            fns = [self.get_path(self.get_name('FPLAN'))]
+        for fn in fns:
+            for line in open(fn, encoding='latin1'):
+                linenumber += 1
+                if line.startswith('%'):
+                    continue
+                if line.startswith('*'):
+                    if line.startswith('*Z'):
+                        #  new trip starts
+                        #  write data for previous trips
+                        self.write_trips()
+                        #  reset data
+                        self.meta = {}
+                        self.stop_informations = []
+                    state = 'meta'
+                    self.meta.update(self.parse_fplan_meta(line))
 
-            else:
-                if not state == 'data':
-                    #  beginning of data block
-                    state = 'data'
-                    stop_sequence = 0
-                    self.write_route(self.meta)
-                stop_sequence += 1
-                stop_line_info = self.parse_schedule(line)
-                self.stop_informations.append(stop_line_info)
-                self.meta['headsign'] = stop_line_info['stop_name']
+                else:
+                    if not state == 'data':
+                        #  beginning of data block
+                        state = 'data'
+                        stop_sequence = 0
+                        self.write_route(self.meta)
+                    stop_sequence += 1
+                    stop_line_info = self.parse_schedule(line)
+                    self.stop_informations.append(stop_line_info)
+                    self.meta['headsign'] = stop_line_info['stop_name']
 
         #  Finally write last trips
         self.write_trips()
@@ -1072,6 +1080,8 @@ def main(hafas_dir, out_dir, options=None):
         mapping = dict([o.split(':') for o in options.get(
                                  '--mapping').split(',')])
         config['mapping'].update(mapping)
+
+    config['tt_wildcard'] = options.get('--tt_wildcard')
     h2g = Hafas2GTFS(hafas_dir, out_dir, **config)
     h2g.create()
 
